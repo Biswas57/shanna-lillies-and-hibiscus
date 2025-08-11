@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>For Shanna</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Favicon -->
+    <link rel="icon" href="favicon/favicon.ico" type="image/x-icon" />
+    <link rel="shortcut icon" href="favicon/favicon.ico" type="image/x-icon" />
+    <link rel="apple-touch-icon" sizes="180x180" href="favicon/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16x16.png" />
+    <style>
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            background: #000;
+            overflow: hidden;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        }
+
+        #stage {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Minimal overlay shown until media is loaded or user gesture needed */
+        #overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, .85);
+            color: #bbb;
+            text-align: center;
+            padding: 24px;
+            gap: 18px;
+            flex-direction: column;
+        }
+
+        #overlay.hidden {
+            display: none;
+        }
+
+        .btn {
+            border: 1px solid #666;
+            padding: 10px 16px;
+            border-radius: 6px;
+            color: #ddd;
+            background: #111;
+        }
+
+        .hint {
+            font-size: 14px;
+            color: #888
+        }
+
+        #pickers {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center
+        }
+
+        input[type="file"] {
+            display: none
+        }
+
+        label.pill {
+            border: 1px dashed #555;
+            padding: 10px 14px;
+            border-radius: 999px;
+            color: #ddd;
+            background: #0a0a0a;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="stage"></canvas>
+
+    <div id="overlay">
+        <div>
+            <div style="font-size:18px; color:#eee; margin-bottom:8px;">getting it ready...</div>
+            <div id="pickers" style="display:none;">
+                <label class="pill">
+                    <input id="dirPicker" type="file" webkitdirectory multiple />
+                    Pick folder…
+                </label>
+                <label class="pill">
+                    <input id="audioPicker" type="file" accept="audio/*" />
+                    Pick song (optional)…
+                </label>
+            </div>
+            <div class="hint" style="margin-top:12px;">
+                be a little patient fn, click to start it tho
+            </div>
+        </div>
+        <button id="startBtn" class="btn" style="display:none">Start</button>
+    </div>
+
+    <audio id="music" preload="auto"></audio>
+
+    <script>
+        (function () {
+            const canvas = document.getElementById('stage');
+            const ctx = canvas.getContext('2d', { alpha: true });
+            const overlay = document.getElementById('overlay');
+            const startBtn = document.getElementById('startBtn');
+            const dirPicker = document.getElementById('dirPicker');
+            const audioPicker = document.getElementById('audioPicker');
+            const music = document.getElementById('music');
+
+            // ====== TWEAKS ======
+            const TARGET_FPS = 6;           // 8 frames/sec = 0.125 seconds between flowers
+            const FIT_MODE = 'contain';      // 'contain' keeps full flower visible; 'cover' fills screen.
+            const FLOWER_SCALE = 0.6;       // Scale flowers to 60% of their natural size
+
+            // Set your default song and start timestamp (in seconds)
+            const DEFAULT_SONG = 'song.mp3'; // Put your song file here
+            const START_TIMESTAMP = 110; // Start at 110 seconds
+            // =====================
+
+            // Set music source immediately when page loads
+            music.src = DEFAULT_SONG;
+
+            let W = 0, H = 0;
+            function resize() {
+                const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+                canvas.width = Math.floor(innerWidth * dpr);
+                canvas.height = Math.floor(innerHeight * dpr);
+                canvas.style.width = innerWidth + 'px';
+                canvas.style.height = innerHeight + 'px';
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                W = innerWidth; H = innerHeight;
+            }
+            addEventListener('resize', resize, { passive: true }); resize();
+
+            // Load images from dropped folder / picker
+            let images = [];
+            let running = false;
+            let lastSwap = 0;
+            const swapInterval = 1000 / TARGET_FPS;
+
+            function isImage(name) {
+                return /\.(png|jpg|jpeg|webp|gif|avif)$/i.test(name);
+            }
+
+            function drawCentered(img) {
+                ctx.clearRect(0, 0, W, H);
+                const iw = img.naturalWidth, ih = img.naturalHeight;
+                if (!iw || !ih) return;
+
+                let rw = W, rh = H;
+                const scaleContain = Math.min(W / iw, H / ih);
+                const scaleCover = Math.max(W / iw, H / ih);
+                const s = (FIT_MODE === 'cover' ? scaleCover : scaleContain) * FLOWER_SCALE;
+                rw = iw * s; rh = ih * s;
+
+                const x = (W - rw) / 2;
+                const y = (H - rh) / 2;
+
+                ctx.drawImage(img, x, y, rw, rh);
+            }
+
+            function shuffleInPlace(arr) {
+                for (let i = arr.length - 1; i > 0; i--) {
+                    const j = (Math.random() * (i + 1)) | 0;
+                    [arr[i], arr[j]] = [arr[j], arr[i]];
+                }
+                return arr;
+            }
+
+            function startLoop() {
+                if (running || images.length === 0) return;
+                running = true;
+                let idx = 0;
+                let batch = shuffleInPlace(images.slice());
+
+                function tick(ts) {
+                    if (!running) return;
+                    if (ts - lastSwap >= swapInterval) {
+                        if (idx >= batch.length) { batch = shuffleInPlace(images.slice()); idx = 0; }
+                        drawCentered(batch[idx++]);
+                        lastSwap = ts;
+                    }
+                    requestAnimationFrame(tick);
+                }
+                requestAnimationFrame(tick);
+            }
+
+            async function filesToImages(fileList) {
+                const imgs = [];
+                // Sort by name for determinism before we randomize; keeps things tidy.
+                const files = [...fileList].filter(f => isImage(f.name)).sort((a, b) => a.name.localeCompare(b.name));
+                for (const f of files) {
+                    const url = URL.createObjectURL(f);
+                    const img = new Image();
+                    img.decoding = 'async';
+                    img.src = url;
+                    await img.decode().catch(() => { /* ignore decode errors */ });
+                    imgs.push(img);
+                }
+                return imgs;
+            }
+
+            function hideOverlay() {
+                overlay.classList.add('hidden');
+            }
+            function showStartButton() {
+                startBtn.style.display = 'inline-block';
+            }
+
+            // Handle drag/drop
+            window.addEventListener('dragover', e => { e.preventDefault(); });
+            window.addEventListener('drop', async e => {
+                e.preventDefault();
+                const items = e.dataTransfer.items;
+                if (!items || !items.length) return;
+
+                const files = [];
+                // Chrome/Edge support directory drag via DataTransferItem.webkitGetAsEntry
+                for (const it of items) {
+                    const entry = it.webkitGetAsEntry && it.webkitGetAsEntry();
+                    if (entry && entry.isDirectory) {
+                        await readDirEntry(entry, files);
+                    } else {
+                        const f = it.getAsFile && it.getAsFile();
+                        if (f) files.push(f);
+                    }
+                }
+                images = await filesToImages(files);
+                if (images.length === 0) return;
+
+                startVisuals();
+            });
+
+            // Recursive directory reader (webkit)
+            async function readDirEntry(entry, outFiles) {
+                if (entry.isFile) {
+                    await new Promise(res => entry.file(f => { outFiles.push(f); res(); }));
+                } else if (entry.isDirectory) {
+                    const reader = entry.createReader();
+                    await new Promise(resolve => {
+                        const batch = [];
+                        function read() {
+                            reader.readEntries(async entries => {
+                                if (!entries.length) {
+                                    // flatten pending
+                                    resolve();
+                                } else {
+                                    for (const e of entries) {
+                                        await readDirEntry(e, outFiles);
+                                    }
+                                    read();
+                                }
+                            });
+                        }
+                        read();
+                    });
+                }
+            }
+
+            // Folder picker
+            dirPicker.addEventListener('change', async e => {
+                images = await filesToImages(e.target.files);
+                if (images.length) startVisuals();
+            });
+
+            // Audio picker (optional if you already hardcode a song)
+            audioPicker.addEventListener('change', e => {
+                const [file] = e.target.files || [];
+                if (file) {
+                    music.src = URL.createObjectURL(file);
+                }
+            });
+
+            async function attemptAutoplay() {
+                console.log('Attempting autoplay, music.src:', music.src, 'START_TIMESTAMP:', START_TIMESTAMP);
+                try {
+                    if (music.src) {
+                        music.currentTime = START_TIMESTAMP; // Set start timestamp
+                        console.log('About to play music from timestamp:', START_TIMESTAMP);
+                        await music.play();
+                        console.log('Music started playing successfully!');
+                        // If music plays successfully, hide overlay and start visuals
+                        hideOverlay();
+                        startLoop();
+                    } else {
+                        console.log('No music source set');
+                        hideOverlay();
+                        startLoop();
+                    }
+                } catch (error) {
+                    // Autoplay blocked - require user interaction
+                    console.log('Autoplay blocked, showing click-to-start overlay:', error);
+                    showClickToStart();
+                }
+            }
+
+            function showClickToStart() {
+                // Make overlay clickable to start music and visuals
+                overlay.style.cursor = 'pointer';
+                overlay.onclick = async () => {
+                    try {
+                        if (music.src) {
+                            music.currentTime = START_TIMESTAMP;
+                            await music.play();
+                            console.log('Music started after user interaction!');
+                        }
+                    } catch (error) {
+                        console.log('Failed to start music even after click:', error);
+                    }
+                    hideOverlay();
+                    startLoop();
+                    overlay.onclick = null; // Remove click handler
+                    overlay.style.cursor = '';
+                };
+            }
+
+            function startVisuals() {
+                // Music source should already be set by now
+                attemptAutoplay();
+            }
+
+            // Keyboard quickies: Space toggles pause/play, +/- speed tweak
+            let paused = false;
+            window.addEventListener('keydown', e => {
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    paused = !paused;
+                    running = !paused;
+                    if (running) requestAnimationFrame(ts => { lastSwap = ts; startLoop(); });
+                }
+            });
+
+            // Auto-load all images from imgs-bg-removed folder
+            const FLOWER_IMAGES = [
+                'imgs-bg-removed/1000_F_90418934_B9C4ZrvqulGTf592kQ0bJ9DEjFwL1pQ3-bg-removed.jpg',
+                'imgs-bg-removed/4464ec2b55442f39a878f72f3099c0fd-bg-removed.jpg',
+                'imgs-bg-removed/481158512_ee8894c99b_c-bg-removed.jpg',
+                'imgs-bg-removed/4e75c8d0e69ce8c592866e85d6517392_t-bg-removed.jpeg',
+                'imgs-bg-removed/6925421482_1d95e666f4_z-bg-removed.jpg',
+                'imgs-bg-removed/c5c2c324f27b6962acb0583fb45e4a5b-bg-removed.jpg',
+                'imgs-bg-removed/delicate-yellow-hibiscus-flower-found-600nw-153154385-bg-removed.webp',
+                'imgs-bg-removed/hibiscus-flower-front-view-full-length-isolate-on-transparency-background-png-bg-removed.webp',
+                'imgs-bg-removed/images-bg-removed.jpeg',
+                'imgs-bg-removed/IMG_9201-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9202-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9203-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9204-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9205-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9206-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9207-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9208-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9209-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9210-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9211-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9212-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9213-bg-removed.jpg',
+                'imgs-bg-removed/IMG_9214-bg-removed.jpg',
+                'imgs-bg-removed/istockphoto-471387261-612x612-bg-removed.jpg',
+                'imgs-bg-removed/istockphoto-1341606964-612x612-bg-removed.jpg',
+                'imgs-bg-removed/istockphoto-1367077385-612x612-bg-removed.jpg',
+                'imgs-bg-removed/photo-1554569258-670a25302596-bg-removed.avif',
+                'imgs-bg-removed/photo-1501973931234-5ac2964cd94a-bg-removed.jpeg',
+                'imgs-bg-removed/photo-1634827099109-2509fa35bd12-bg-removed.avif',
+                'imgs-bg-removed/photo-1651914419516-45a585357284-bg-removed.avif',
+                'imgs-bg-removed/photo-1655751080578-39d307cb0f81-bg-removed.avif',
+                'imgs-bg-removed/pngtree-a-stunning-garden-lily-in-full-bloom-captured-from-the-front-view-photo-photo-image_28970478-bg-removed.jpg',
+                'imgs-bg-removed/pngtree-white-hibiscus-flower-close-up-png-image_14760567-bg-removed.png',
+                'imgs-bg-removed/premium_photo-1710101282292-1792d9b8494b-bg-removed.avif',
+                'imgs-bg-removed/premium_photo-1710752929743-3cfe8ff3d087-bg-removed.avif'
+            ];
+
+            async function preloadPreset(list) {
+                const files = [];
+                for (const src of list) {
+                    const img = new Image();
+                    img.src = src;
+                    await img.decode().catch(() => { });
+                    files.push(img);
+                }
+                images = files;
+                console.log(`Loaded ${images.length} flower images!`);
+                // Images are ready, try to start
+                if (images.length) startVisuals();
+            }
+
+            // Auto-load images on page load
+            window.addEventListener('load', () => {
+                preloadPreset(FLOWER_IMAGES);
+            });
+
+        })();
+    </script>
+</body>
+
+</html>
