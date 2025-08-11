@@ -99,7 +99,7 @@
         <button id="startBtn" class="btn" style="display:none">Start</button>
     </div>
 
-    <audio id="music" preload="auto"></audio>
+    <audio id="music" preload="auto" playsinline webkit-playsinline></audio>
 
     <script>
         (function () {
@@ -129,6 +129,16 @@
 
             // Set music source immediately when page loads
             music.src = DEFAULT_SONG;
+            music.load(); // Force load the audio file
+
+            // Add mobile-specific audio setup
+            music.addEventListener('canplaythrough', () => {
+                console.log('Audio can play through completely');
+            });
+
+            music.addEventListener('loadedmetadata', () => {
+                console.log('Audio metadata loaded, duration:', music.duration);
+            });
 
             let W = 0, H = 0;
             function resize() {
@@ -317,21 +327,56 @@
 
                 // Make overlay clickable to start music and visuals
                 overlay.style.cursor = 'pointer';
-                overlay.onclick = async () => {
+
+                // Handle both click and touch events for mobile compatibility
+                const startHandler = async (e) => {
+                    e.preventDefault();
                     try {
                         if (music.src) {
-                            music.currentTime = START_TIMESTAMP;
+                            console.log('User interaction detected, starting music...');
+
+                            // Wait for audio to be ready before setting timestamp
+                            if (music.readyState >= 2) { // HAVE_CURRENT_DATA
+                                music.currentTime = START_TIMESTAMP;
+                                console.log('Set timestamp to:', START_TIMESTAMP);
+                            } else {
+                                // Wait for loadeddata event
+                                music.addEventListener('loadeddata', () => {
+                                    music.currentTime = START_TIMESTAMP;
+                                    console.log('Set timestamp after loadeddata to:', START_TIMESTAMP);
+                                }, { once: true });
+                            }
+
+                            music.volume = 1.0; // Ensure volume is set
                             await music.play();
                             console.log('Music started after user interaction!');
                         }
                     } catch (error) {
-                        console.log('Failed to start music even after click:', error);
+                        console.log('Failed to start music even after interaction:', error);
+                        // Try without setting currentTime first
+                        try {
+                            await music.play();
+                            // Set timestamp after playback starts
+                            setTimeout(() => {
+                                music.currentTime = START_TIMESTAMP;
+                                console.log('Set timestamp with delay to:', START_TIMESTAMP);
+                            }, 100);
+                            console.log('Music started with fallback method!');
+                        } catch (fallbackError) {
+                            console.log('Fallback also failed:', fallbackError);
+                        }
                     }
                     hideOverlay();
                     startLoop();
-                    overlay.onclick = null; // Remove click handler
+
+                    // Remove event listeners
+                    overlay.removeEventListener('click', startHandler);
+                    overlay.removeEventListener('touchstart', startHandler);
                     overlay.style.cursor = '';
                 };
+
+                overlay.addEventListener('click', startHandler);
+                overlay.addEventListener('touchstart', startHandler, { passive: false });
             }
 
             function startVisuals() {
