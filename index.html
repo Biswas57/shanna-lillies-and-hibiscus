@@ -86,19 +86,14 @@
 
     <div id="overlay">
         <div>
-            <div style="font-size:18px; color:#eee; margin-bottom:8px;">getting it ready...</div>
-            <div id="pickers" style="display:none;">
-                <label class="pill">
-                    <input id="dirPicker" type="file" webkitdirectory multiple />
-                    Pick folder…
-                </label>
-                <label class="pill">
-                    <input id="audioPicker" type="file" accept="audio/*" />
-                    Pick song (optional)…
-                </label>
+            <div id="loadingText" style="font-size:18px; color:#eee; margin-bottom:8px;">getting it ready...</div>
+            <div id="readyText" style="font-size:18px; color:#eee; margin-bottom:8px; display:none;">It's ready now
+                nigga 😛</div>
+            <div id="loadingHint" class="hint" style="margin-top:12px;">
+                be a little patient fn
             </div>
-            <div class="hint" style="margin-top:12px;">
-                be a little patient fn, click to start it tho
+            <div id="readyHint" class="hint" style="margin-top:12px; display:none;">
+                you can click to start it now babe
             </div>
         </div>
         <button id="startBtn" class="btn" style="display:none">Start</button>
@@ -115,6 +110,12 @@
             const dirPicker = document.getElementById('dirPicker');
             const audioPicker = document.getElementById('audioPicker');
             const music = document.getElementById('music');
+
+            // Get overlay text elements
+            const loadingText = document.getElementById('loadingText');
+            const readyText = document.getElementById('readyText');
+            const loadingHint = document.getElementById('loadingHint');
+            const readyHint = document.getElementById('readyHint');
 
             // ====== TWEAKS ======
             const TARGET_FPS = 6;           // 8 frames/sec = 0.125 seconds between flowers
@@ -266,19 +267,23 @@
                 }
             }
 
-            // Folder picker
-            dirPicker.addEventListener('change', async e => {
-                images = await filesToImages(e.target.files);
-                if (images.length) startVisuals();
-            });
+            // Folder picker (won't be used since pickers are hidden, but keeping for compatibility)
+            if (dirPicker) {
+                dirPicker.addEventListener('change', async e => {
+                    images = await filesToImages(e.target.files);
+                    if (images.length) startVisuals();
+                });
+            }
 
-            // Audio picker (optional if you already hardcode a song)
-            audioPicker.addEventListener('change', e => {
-                const [file] = e.target.files || [];
-                if (file) {
-                    music.src = URL.createObjectURL(file);
-                }
-            });
+            // Audio picker (won't be used since pickers are hidden, but keeping for compatibility)
+            if (audioPicker) {
+                audioPicker.addEventListener('change', e => {
+                    const [file] = e.target.files || [];
+                    if (file) {
+                        music.src = URL.createObjectURL(file);
+                    }
+                });
+            }
 
             async function attemptAutoplay() {
                 console.log('Attempting autoplay, music.src:', music.src, 'START_TIMESTAMP:', START_TIMESTAMP);
@@ -304,6 +309,12 @@
             }
 
             function showClickToStart() {
+                // Update text to show it's ready
+                loadingText.style.display = 'none';
+                readyText.style.display = 'block';
+                loadingHint.style.display = 'none';
+                readyHint.style.display = 'block';
+
                 // Make overlay clickable to start music and visuals
                 overlay.style.cursor = 'pointer';
                 overlay.onclick = async () => {
@@ -388,6 +399,12 @@
                 }
                 images = files;
                 console.log(`Loaded ${images.length} flower images!`);
+
+                // Show that images are loaded and ready
+                if (loadingText && readyText) {
+                    loadingText.textContent = `Loaded ${images.length} flowers! 🌺`;
+                }
+
                 // Images are ready, try to start
                 if (images.length) startVisuals();
             }
